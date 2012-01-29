@@ -29,17 +29,28 @@ The requirements for this library are:
 
 * A *NIX compatible operating system
 * the PCNTL PHP extension (http://php.net/manual/en/book.pcntl.php)
-* the SHMOP PHP extension (http://php.net/manual/en/book.shmop.php)
 * Scripts must not run from an apache module
+
+Errors and exceptions
+---------------------
+
+if a task throws an exception it is caught and registered as an error. The
+exception's code is used as error number, where the message is used as error
+message.
+
+By using this, instead of dying, you can continue execution of the other parallel
+processes and handle errors yourself after all processes have been executed.
 
 TODO
 ----
 
 * Improve docs
-* IPC (Inter-Process Communication), to be able to return information from
-Workers to the Manager.
+* More intelligent process slots; currently only the oldest in a 'set' of slots
+  is waited on but if this runs for a longer time then the other slots than
+  those will not be filled as long as the first slot is occupied.
+* Last parts of IPC (Inter-Process Communication), to be able to return
+  information from Workers to the Manager.
 
   * STDOUT
   * STDERR
-  * Result information
-  * Error Code
+

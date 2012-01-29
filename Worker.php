@@ -13,10 +13,8 @@
  */
 
 /**
- * Base class used for all classes which need to support logging and core
- * functionality.
- *
- * This class also contains the (leading) current version number.
+ * Class that represents the execution of a single task within a parallelized
+ * frame.
  *
  * @category DocBlox
  * @package  Parallel
@@ -31,9 +29,6 @@ class DocBlox_Parallel_Worker
 
     /** @var mixed[] A list of argument to pass to the task */
     protected $arguments = array();
-
-    /** @var int the process id for this worker */
-    protected $pid = -1;
 
     /** @var int The return code to tell the parent process how it went */
     protected $return_code = -1;
@@ -82,35 +77,15 @@ class DocBlox_Parallel_Worker
     }
 
     /**
-     * Sets the PID for this Worker.
+     * Returns the available return code.
      *
-     * @param int $pid process id, must be 1 or higher
-     *
-     * @throw InvalidArgumentException if the PID is not a number or less than 1
-     *
-     * @return void
-     */
-    public function setPid($pid)
-    {
-        if (!is_numeric($pid) || ($pid  < 1)) {
-            throw new InvalidArgumentException(
-                'Expected the process id to be a number greater than 0'
-            );
-        }
-
-        $this->pid = $pid;
-    }
-
-    /**
-     * Returns the PID for this Worker.
-     *
-     * Can return -1 if the PID is not set yet.
+     * This method may return -1 if no return code is available yet.
      *
      * @return int
      */
-    public function getPid()
+    public function getReturnCode()
     {
-        return $this->pid;
+        return $this->return_code;
     }
 
     /**
@@ -141,18 +116,6 @@ class DocBlox_Parallel_Worker
     }
 
     /**
-     * Returns the available return code.
-     *
-     * This method may return -1 if no return code is available yet.
-     *
-     * @return int
-     */
-    public function getReturnCode()
-    {
-        return $this->return_code;
-    }
-
-    /**
      * Returns the error message associated with the return code.
      *
      * @return string
@@ -163,6 +126,18 @@ class DocBlox_Parallel_Worker
     }
 
     /**
+     * Sets the error message.
+     *
+     * @param string $error The error message.
+     *
+     * @return void
+     */
+    public function setError($error)
+    {
+        $this->error = $error;
+    }
+
+    /**
      * Returns the result for this task run.
      *
      * @return null|mixed
@@ -170,6 +145,18 @@ class DocBlox_Parallel_Worker
     public function getResult()
     {
         return $this->result;
+    }
+
+    /**
+     * Sets the result for this task run.
+     *
+     * @param mixed $result The value that is returned by the task; can be anything.
+     *
+     * @return void
+     */
+    public function setResult($result)
+    {
+        $this->result = $result;
     }
 
     /**
@@ -212,29 +199,5 @@ class DocBlox_Parallel_Worker
         }
 
         $this->task = $task;
-    }
-
-    /**
-     * Sets the error message.
-     *
-     * @param string $error The error message.
-     *
-     * @return void
-     */
-    protected function setError($error)
-    {
-        $this->error = $error;
-    }
-
-    /**
-     * Sets the result for this task run.
-     *
-     * @param mixed $result The value that is returned by the task; can be anything.
-     *
-     * @return void
-     */
-    protected function setResult($result)
-    {
-        $this->result = $result;
     }
 }

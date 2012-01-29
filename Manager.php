@@ -13,10 +13,10 @@
  */
 
 /**
- * Base class used for all classes which need to support logging and core
- * functionality.
+ * Manager class for Parallel processes.
  *
- * This class also contains the (leading) current version number.
+ * This class will manage the workers and make sure all processes are executed
+ * in parallel and not too many at the same time.
  *
  * @category DocBlox
  * @package  Parallel
@@ -31,6 +31,26 @@ class DocBlox_Parallel_Manager extends ArrayObject
 
     /** @var boolean Tracks whether this manager is currently executing */
     protected $is_running = false;
+
+    /**
+     * Tries to autodetect the optimal number of process by counting the number
+     * of processors.
+     *
+     * @param array  $input          Input for the array object.
+     * @param int    $flags          flags for the array object.
+     * @param string $iterator_class Iterator class for this array object.
+     */
+    public function __construct(
+        $input = array(), $flags = 0, $iterator_class = "ArrayIterator"
+    ) {
+        parent::__construct($input, $flags, $iterator_class);
+
+        if (is_readable('/proc/cpuinfo')) {
+            $processors = 0;
+            exec("cat /proc/cpuinfo | grep processor | wc -l", $processors);
+            $this->setProcessLimit(reset($processors));
+        }
+    }
 
     /**
      * Adds a worker to to the queue.
@@ -185,8 +205,8 @@ class DocBlox_Parallel_Manager extends ArrayObject
         // throw a E_USER_NOTICE if the requirements are not met.
         if (!$this->checkRequirements()) {
             trigger_error(
-                'Either PCNTL or SHMOP extension is not available, running '
-                . 'workers in series instead of parallel',
+                'The PCNTL extension is not available, running workers in series '
+                . 'instead of parallel',
                 E_USER_NOTICE
             );
         }
@@ -208,6 +228,11 @@ class DocBlox_Parallel_Manager extends ArrayObject
         // running wait for them to finish
         while (!empty($processes)) {
             pcntl_waitpid(array_shift($processes), $status);
+        }
+
+        /** @var DocBlox_Parallel_Worker $worker */
+        foreach ($this as $worker) {
+            $worker->pipe->push();
         }
 
         $this->is_running = false;
@@ -240,6 +265,8 @@ class DocBlox_Parallel_Manager extends ArrayObject
     protected function forkAndRun(
         DocBlox_Parallel_Worker $worker, array &$processes
     ) {
+        $worker->pipe = new DocBlox_Parallel_WorkerPipe($worker);
+
         // fork the process and register the PID
         $pid = pcntl_fork();
 
@@ -248,6 +275,8 @@ class DocBlox_Parallel_Manager extends ArrayObject
             throw new RuntimeException('Unable to establish a fork');
         case 0: // Child process
             $worker->execute();
+
+            $worker->pipe->pull();
 
             // Kill -9 this process to prevent closing of shared file handlers.
             // Not doing this causes, for example, MySQL connections to be cleaned.
@@ -270,6 +299,6 @@ class DocBlox_Parallel_Manager extends ArrayObject
      */
     protected function checkRequirements()
     {
-        return (bool)(extension_loaded('pcntl') && extension_loaded('shmop'));
+        return (bool)(extension_loaded('pcntl'));
     }
 }
