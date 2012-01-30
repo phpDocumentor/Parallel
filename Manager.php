@@ -1,4 +1,5 @@
 <?php
+declare(ticks = 1); // required for synchronization between child and parent
 /**
  * DocBlox
  *
@@ -31,6 +32,12 @@ class DocBlox_Parallel_Manager extends ArrayObject
 
     /** @var boolean Tracks whether this manager is currently executing */
     protected $is_running = false;
+
+    /** @var DocBlox_Parallel_Worker[] Workers still to be done in the execution are tracked here */
+    protected $workersToDo = array();
+
+    /** @var int[] All processes started by the manager are tracked here */
+    protected $processes = array();
 
     /**
      * Tries to autodetect the optimal number of process by counting the number
@@ -173,19 +180,57 @@ class DocBlox_Parallel_Manager extends ArrayObject
         /** @var int[] $processes */
         $processes = $this->startExecution();
 
-        /** @var DocBlox_Parallel_Worker $worker */
-        foreach ($this as $worker) {
-
-            // if requirements are not met, execute workers in series.
-            if (!$this->checkRequirements()) {
+        // if requirements are not met, execute workers in series.
+        if (!$this->checkRequirements()) {
+            /** @var DocBlox_Parallel_Worker $worker */
+            foreach ($this as $worker) {
                 $worker->execute();
-                continue;
+            }
+        } else {
+            // Register signalling callback
+            pcntl_signal(SIGUSR1, array($this, 'startNextWorker'));
+
+            // Register a copy of the workers to shift from
+            $this->workersToDo = $this->getArrayCopy();
+
+            // Start as many workers as we can
+            for ($i = 0; $i < $this->getProcessLimit() && $i < count($this); $i++) {
+                $this->startNextWorker();
             }
 
-            $this->forkAndRun($worker, $processes);
+            // Listen for signals from child processes
+            while (true) {
+                $pid = pcntl_waitpid(-1, $status);
+                if (isset($this->processes[$pid])) {
+                    unset($this->processes[$pid]);
+                }
+                if (empty($this->workersToDo) && empty($this->processes)) {
+                    break;
+                }
+            }
         }
 
-        $this->stopExecution($processes);
+        $this->stopExecution();
+    }
+
+    /**
+     * Forks the current process and calls the current Worker's execute method
+     * OR handles the parent process' execution.
+     *
+     * This is the really tricky part of the forking mechanism. Here we invoke
+     * {@link http://www.php.net/manual/en/function.pcntl-fork.php pcntl_fork}
+     * and either execute the forked process or deal with the parent's process
+     * based on in which process we are.
+     *
+     * @throws RuntimeException
+     */
+    protected function startNextWorker()
+    {
+        $worker = array_shift($this->workersToDo);
+        if (empty($worker)) {
+            return;
+        }
+        $this->forkAndRun($worker);
     }
 
     /**
@@ -218,21 +263,14 @@ class DocBlox_Parallel_Manager extends ArrayObject
      * Waits for all processes to have finished and notifies the manager that
      * execution has stopped.
      *
-     * @param int[] &$processes List of running processes.
-     *
      * @return void
      */
-    protected function stopExecution(array &$processes)
+    protected function stopExecution()
     {
-        // starting of processes has ended but some processes might still be
-        // running wait for them to finish
-        while (!empty($processes)) {
-            pcntl_waitpid(array_shift($processes), $status);
-        }
-
         /** @var DocBlox_Parallel_Worker $worker */
         foreach ($this as $worker) {
-            $worker->pipe->push();
+            if (isset($worker->pipe))
+                $worker->pipe->push();
         }
 
         $this->is_running = false;
@@ -252,22 +290,17 @@ class DocBlox_Parallel_Manager extends ArrayObject
      * {@link http://www.php.net/manual/en/function.pcntl-fork.php pcntl_fork}
      * and associated articles.
      *
-     * If there are more workers than may be ran simultaneously then this method
-     * will wait until a slot becomes available and then starts the next worker.
-     *
      * @param DocBlox_Parallel_Worker $worker     The worker to process.
-     * @param int[]                   &$processes The list of running processes.
      *
      * @throws RuntimeException if we are unable to fork.
      *
      * @return void
      */
-    protected function forkAndRun(
-        DocBlox_Parallel_Worker $worker, array &$processes
-    ) {
+    protected function forkAndRun(DocBlox_Parallel_Worker $worker) {
         $worker->pipe = new DocBlox_Parallel_WorkerPipe($worker);
 
         // fork the process and register the PID
+        $parentPid = getmypid();
         $pid = pcntl_fork();
 
         switch ($pid) {
@@ -278,16 +311,15 @@ class DocBlox_Parallel_Manager extends ArrayObject
 
             $worker->pipe->pull();
 
+            // Signal the parent the child is ready
+            posix_kill($parentPid, SIGUSR1);
+
             // Kill -9 this process to prevent closing of shared file handlers.
             // Not doing this causes, for example, MySQL connections to be cleaned.
             posix_kill(getmypid(), SIGKILL);
         default: // Parent process
-            // Keep track if the worker children
-            $processes[] = $pid;
-
-            if (count($processes) >= $this->getProcessLimit()) {
-                pcntl_waitpid(array_shift($processes), $status);
-            }
+            // Keep track of the worker children
+            $this->processes[$pid] = true;
             break;
         }
     }
