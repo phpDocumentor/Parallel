@@ -55,3 +55,27 @@ $mgr->execute();
 foreach ($mgr as $worker) {
     var_dump($worker->getResult());
 }
+
+// -----------------------------------------------------------------------------
+// Extra test: demonstrating timing with callbacks
+// This should finish in 8 seconds without callback, and 5 seconds with
+// (Tested on quad core)
+// -----------------------------------------------------------------------------
+
+$time = microtime(true);
+
+$mgr = new DocBlox_Parallel_Manager();
+$mgr
+    ->addWorker(new DocBlox_Parallel_Worker(function() { sleep(5); return 'k'; }))
+    ->addWorker(new DocBlox_Parallel_Worker(function() { sleep(4); return 'l'; }))
+    ->addWorker(new DocBlox_Parallel_Worker(function() { sleep(4); return 'm'; }))
+    ->addWorker(new DocBlox_Parallel_Worker(function() { sleep(2); return 'n'; }))
+    ->addWorker(new DocBlox_Parallel_Worker(function() { sleep(3); return 'o'; }))
+    ->execute();
+
+/** @var DocBlox_Parallel_Worker $worker */
+foreach ($mgr as $worker) {
+    var_dump($worker->getResult());
+}
+
+echo 'Time: ' . (microtime(true) - $time) . PHP_EOL;
